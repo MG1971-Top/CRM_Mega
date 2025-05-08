@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRM Megacable</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { background-color: #f5f6fa; }
+    .card-priority-alta { border-left: 5px solid green; }
+    .card-priority-media { border-left: 5px solid orange; }
+    .card-priority-baja { border-left: 5px solid red; }
+  </style>
+</head>
+<body class="container py-4">
+  <h1 class="text-center mb-4">CRM Megacable</h1>
+
+  <!-- Login/Registro -->
+  <div id="auth-section">
+    <div class="card p-3 mb-3">
+      <h5>Iniciar sesión / Registrarse</h5>
+      <input type="email" id="email" class="form-control mb-2" placeholder="Correo electrónico">
+      <input type="password" id="password" class="form-control mb-2" placeholder="Contraseña">
+      <button class="btn btn-primary w-100 mb-2" onclick="login()">Iniciar Sesión</button>
+      <button class="btn btn-secondary w-100 mb-2" onclick="register()">Registrarse</button>
+      <button class="btn btn-link w-100" onclick="resetPassword()">Recuperar contraseña</button>
+    </div>
+  </div>
+
+  <!-- Formulario y funcionalidades principales -->
+  <div id="main-section" style="display:none;">
+    <div class="card p-3 mb-3">
+      <h5>Nuevo Prospecto</h5>
+      <input id="nombre" placeholder="Nombre del Prospecto" class="form-control mb-2">
+      <input id="direccion" placeholder="Dirección" class="form-control mb-2">
+      <input id="telefono" placeholder="Teléfono" class="form-control mb-2">
+      <select id="paquete" class="form-control mb-2">
+        <option value="100mb">100mb</option>
+        <option value="200mb">200mb</option>
+        <option value="300mb">300mb</option>
+        <option value="500mb">500mb</option>
+        <option value="1000mb">1000mb</option>
+      </select>
+      <select id="prioridad" class="form-control mb-2">
+        <option value="alta">Alta</option>
+        <option value="media">Media</option>
+        <option value="baja">Baja</option>
+      </select>
+      <input id="descripcion" placeholder="Descripción" class="form-control mb-2">
+      <button onclick="crearProspecto()" class="btn btn-success w-100">Guardar Prospecto</button>
+    </div>
+
+    <!-- Prospectos -->
+    <div id="prospectos-container" class="mb-3"></div>
+    <button onclick="exportarExcel()" class="btn btn-info mb-3">Exportar Todo a Excel</button>
+    <canvas id="graficaPrioridades" height="100"></canvas>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-auth.js";
+    import { getFirestore, collection, addDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCHBhE5OJanSdCR0_PFrcZxaanT1F2DogQ",
+      authDomain: "crm-mega.firebaseapp.com",
+      projectId: "crm-mega",
+      storageBucket: "crm-mega.firebasestorage.app",
+      messagingSenderId: "792977903520",
+      appId: "1:792977903520:web:f197c3c066c3b8c551dec5"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth();
+    const db = getFirestore(app);
+
+    window.login = () => {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      signInWithEmailAndPassword(auth, email, password)
+        .then(() => alert('Login exitoso'))
+        .catch(err => alert('Error en login: ' + err.message));
+    };
+
+    window.register = () => {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      createUserWithEmailAndPassword(auth, email, password)
+        .then(() => alert('Usuario registrado'))
+        .catch(err => alert('Error en registro: ' + err.message));
+    };
+
+    window.resetPassword = () => {
+      const email = document.getElementById('email').value;
+      sendPasswordResetEmail(auth, email)
+        .then(() => alert('Correo enviado'))
+        .catch(err => alert('Error: ' + err.message));
+    };
+
+    onAuthStateChanged(auth, user => {
+      if (user) {
+        document.getElementById('auth-section').style.display = 'none';
+        document.getElementById('main-section').style.display = 'block';
+        cargarProspectos();
+      }
+    });
+
+    window.crearProspecto = async () => {
+      const prospecto = {
+        nombre: document.getElementById('nombre').value,
+        direccion: document.getElementById('direccion').value,
+        telefono: document.getElementById('telefono').value,
+        paquete: document.getElementById('paquete').value,
+        prioridad: document.getElementById('prioridad').value,
+        descripcion: document.getElementById('descripcion').value,
+        folio: 'FOLIO-' + Date.now(),
+        estado: 'abierto',
+        userId: auth.currentUser.uid
+      };
+      await addDoc(collection(db, 'prospectos'), prospecto);
+      alert('Prospecto creado');
+      cargarProspectos();
+    };
+
+    async function cargarProspectos() {
+      const q = query(collection(db, 'prospectos'), where('userId', '==', auth.currentUser.uid));
+      const snapshot = await getDocs(q);
+      const container = document.getElementById('prospectos-container');
+      container.innerHTML = '';
+
+      let conteo = { alta: 0, media: 0, baja: 0 };
+
+      snapshot.forEach(doc => {
+        const d = doc.data();
+        conteo[d.prioridad]++;
+        const card = document.createElement('div');
+        card.className = `card p-2 mb-2 card-priority-${d.prioridad}`;
+        card.innerHTML = `
+          <strong>${d.nombre}</strong><br>
+          Folio: ${d.folio} | ${d.paquete} | ${d.prioridad}<br>
+          <small>${d.direccion} - ${d.telefono}</small><br>
+          <p>${d.descripcion}</p>
+          <button class="btn btn-sm btn-outline-danger" onclick='exportarPDF("${d.folio}", "${d.nombre}")'>Exportar a PDF</button>
+        `;
+        container.appendChild(card);
+      });
+
+      new Chart(document.getElementById('graficaPrioridades'), {
+        type: 'bar',
+        data: {
+          labels: ['Alta', 'Media', 'Baja'],
+          datasets: [{
+            label: 'Prospectos por Prioridad',
+            data: [conteo.alta, conteo.media, conteo.baja],
+            backgroundColor: ['green', 'orange', 'red']
+          }]
+        }
+      });
+    }
+
+    window.exportarPDF = (folio, nombre) => {
+      alert('Función de exportar a PDF activa para: ' + folio);
+    };
+
+    window.exportarExcel = () => {
+      alert('Exportación a Excel simulada. Integra SheetJS u otra librería para archivo real.');
+    };
+  </script>
+</body>
+</html>
